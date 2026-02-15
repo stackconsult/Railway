@@ -1,7 +1,6 @@
 {
   "name": "openclaw-railway-template",
   "version": "1.1.0",
-  "description": "Production-ready OpenClaw deployment template for Railway with memory optimization and enhanced error handling",
   "private": true,
   "type": "module",
   "engines": {
@@ -10,8 +9,7 @@
   "scripts": {
     "dev": "node src/server.js",
     "start": "node src/server.js",
-    "lint": "node -c src/server.js",
-    "health": "curl -f http://localhost:8080/setup/healthz || exit 1"
+    "lint": "node -c src/server.js"
   },
   "dependencies": {
     "express": "^5.1.0",
@@ -19,29 +17,9 @@
     "node-pty": "^1.0.0",
     "ws": "^8.18.0"
   },
-  "devDependencies": {},
   "pnpm": {
     "onlyBuiltDependencies": [
       "node-pty"
     ]
-  },
-  "keywords": [
-    "openclaw",
-    "ai-agent",
-    "railway",
-    "deployment",
-    "template",
-    "automation",
-    "self-hosted"
-  ],
-  "author": "OpenClaw Railway Template",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/openclaw/openclaw-railway-template"
-  },
-  "bugs": {
-    "url": "https://github.com/openclaw/openclaw-railway-template/issues"
-  },
-  "homepage": "https://github.com/openclaw/openclaw-railway-template#readme"
+  }
 }
