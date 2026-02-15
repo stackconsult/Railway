@@ -11,7 +11,12 @@ RUN apt-get update \
     build-essential \
   && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g openclaw@latest
+# Install OpenClaw and verify installation
+RUN npm install -g openclaw@latest \
+  && OPENCLAW_PATH=$(npm root -g)/openclaw \
+  && echo "OpenClaw installed at: $OPENCLAW_PATH" \
+  && ls -la "$OPENCLAW_PATH/" \
+  && test -f "$OPENCLAW_PATH/dist/entry.js" || (echo "OpenClaw entry point not found" && exit 1)
 
 WORKDIR /app
 
@@ -35,11 +40,13 @@ ENV HOMEBREW_PREFIX="/home/linuxbrew/.linuxbrew"
 ENV HOMEBREW_CELLAR="/home/linuxbrew/.linuxbrew/Cellar"
 ENV HOMEBREW_REPOSITORY="/home/linuxbrew/.linuxbrew/Homebrew"
 
+# Set OpenClaw entry path dynamically
+ENV OPENCLAW_ENTRY="$(npm root -g)/openclaw/dist/entry.js"
 ENV PORT=8080
-ENV OPENCLAW_ENTRY=/usr/local/lib/node_modules/openclaw/dist/entry.js
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+# Enhanced healthcheck with longer timeout for Railway
+HEALTHCHECK --interval=30s --timeout=10s --start-period=150s --retries=3 \
   CMD curl -f http://localhost:8080/setup/healthz || exit 1
 
 USER root
