@@ -72,7 +72,9 @@ const GATEWAY_TARGET = `http://${INTERNAL_GATEWAY_HOST}:${INTERNAL_GATEWAY_PORT}
 
 const OPENCLAW_ENTRY =
   process.env.OPENCLAW_ENTRY?.trim() || "/openclaw/dist/entry.js";
-const OPENCLAW_NODE = process.env.OPENCLAW_NODE?.trim() || "node";
+const OPENCLAW_NODE =
+  process.env.OPENCLAW_NODE?.trim() ||
+  `node --max-old-space-size=${process.env.NODE_MAX_OLD_SPACE_SIZE || "4096"} --max-semi-space-size=${process.env.NODE_MAX_SEMI_SPACE_SIZE || "256"}`;
 
 const ENABLE_WEB_TUI = process.env.ENABLE_WEB_TUI?.toLowerCase() === "true";
 const TUI_IDLE_TIMEOUT_MS = Number.parseInt(
@@ -86,6 +88,13 @@ const TUI_MAX_SESSION_MS = Number.parseInt(
 
 function clawArgs(args) {
   return [OPENCLAW_ENTRY, ...args];
+}
+
+function parseNodeCommand(cmdWithArgs) {
+  const parts = cmdWithArgs.trim().split(' ');
+  const nodeCmd = parts[0];
+  const nodeArgs = parts.slice(1);
+  return { nodeCmd, nodeArgs };
 }
 
 function configPath() {
@@ -160,7 +169,8 @@ async function startGateway() {
     OPENCLAW_GATEWAY_TOKEN,
   ];
 
-  gatewayProc = childProcess.spawn(OPENCLAW_NODE, clawArgs(args), {
+  const { nodeCmd, nodeArgs } = parseNodeCommand(OPENCLAW_NODE);
+  gatewayProc = childProcess.spawn(nodeCmd, [...nodeArgs, ...clawArgs(args)], {
     stdio: "inherit",
     env: {
       ...process.env,
@@ -474,7 +484,8 @@ function buildOnboardArgs(payload) {
 
 function runCmd(cmd, args, opts = {}) {
   return new Promise((resolve) => {
-    const proc = childProcess.spawn(cmd, args, {
+    const { nodeCmd, nodeArgs } = parseNodeCommand(cmd);
+    const proc = childProcess.spawn(nodeCmd, [...nodeArgs, ...args], {
       ...opts,
       env: {
         ...process.env,
@@ -816,7 +827,8 @@ function createTuiWebSocketServer(httpServer) {
       if (ptyProcess) return;
 
       console.log(`[tui] spawning PTY with ${cols}x${rows}`);
-      ptyProcess = pty.spawn(OPENCLAW_NODE, clawArgs(["tui"]), {
+      const { nodeCmd, nodeArgs } = parseNodeCommand(OPENCLAW_NODE);
+      ptyProcess = pty.spawn(nodeCmd, [...nodeArgs, ...clawArgs(["tui"])], {
         name: "xterm-256color",
         cols,
         rows,
@@ -884,7 +896,7 @@ function createTuiWebSocketServer(httpServer) {
       if (ptyProcess) {
         try {
           ptyProcess.kill();
-        } catch {}
+        } catch { }
       }
       activeTuiSession = null;
     });
@@ -1010,7 +1022,7 @@ async function gracefulShutdown(signal) {
     try {
       activeTuiSession.ws.close(1001, "Server shutting down");
       activeTuiSession.pty.kill();
-    } catch {}
+    } catch { }
     activeTuiSession = null;
   }
 

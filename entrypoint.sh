@@ -10,4 +10,4 @@ fi
 rm -rf /home/linuxbrew/.linuxbrew
 ln -sfn /data/.linuxbrew /home/linuxbrew/.linuxbrew
 
-exec gosu openclaw node src/server.js
+exec gosu openclaw node --max-old-space-size=${NODE_MAX_OLD_SPACE_SIZE:-4096} --max-semi-space-size=${NODE_MAX_SEMI_SPACE_SIZE:-256} src/server.js
