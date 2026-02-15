@@ -8,96 +8,135 @@
 
 ![OpenCrawl Setup Complete Page](https://res.cloudinary.com/asset-cloudinary/image/upload/v1770581375/openclaw_sb_pa8ipt.png)
 
+## 📚 Documentation
 
-## About Hosting OpenClaw Railway Template
+- **[Deployment Guide](docs/DEPLOYMENT_GUIDE.md)** - Complete setup and configuration instructions
+- **[Changelog](docs/CHANGELOG.md)** - Version history and changes
+- **[Memory Fix Summary](docs/MEMORY_FIX_SUMMARY.md)** - JavaScript heap memory issue resolution
+- **[Gateway Fix Summary](docs/GATEWAY_FIX_SUMMARY.md)** - Gateway availability timeout fixes
 
-Hosting OpenClaw involves running it as a long-lived service with access to environment variables, compute resources, and optional external APIs. This Railway template packages OpenClaw in a containerized service, handles startup configuration, and exposes it over Railway’s infrastructure. You deploy it with a few clicks, configure required environment variables, and interact with OpenClaw remotely via supported clients or SSH. No manual server setup or VM management required. 🚀
+## 🚀 Quick Start
 
-## Common Use Cases
+1. **Deploy**: Click the "Deploy on Railway" button above
+2. **Configure**: Set required environment variables in Railway dashboard
+3. **Setup**: Visit `https://your-app.up.railway.app/setup`
+4. **Configure OpenClaw**: Follow the setup wizard
 
-* Running a self-hosted AI agent for task automation
-* Experimenting with autonomous agents and workflows
-* Hosting OpenClaw for development, testing, or internal tools
+## ⚙️ Required Environment Variables
 
-## Dependencies for OpenClaw Railway Template Hosting
+```bash
+SETUP_PASSWORD=your-secure-password-here
+OPENCLAW_STATE_DIR=/data/.openclaw
+OPENCLAW_WORKSPACE_DIR=/data/workspace
+```
 
-* Railway account
-* Supported LLM provider API key (for example, OpenAI or equivalent)
+## 🔧 Optional Configuration
 
-### Deployment Dependencies
+```bash
+# Memory settings (recommended for production)
+NODE_MAX_OLD_SPACE_SIZE=4096
+NODE_MAX_SEMI_SPACE_SIZE=256
 
-- [OpenClaw GitHub Repository](https://github.com/openclaw/openclaw) - Source code for the AI agent framework
-- [Anthropic API Keys](https://platform.claude.com/) - Claude AI models (recommended)
-- [OpenAI API Keys](https://platform.openai.com/) - GPT models (alternative)
-- [Google AI Studio](https://aistudio.google.com/) - Gemini models (alternative)
-- [Telegram BotFather](https://t.me/botfather) - Create Telegram bots for messaging
-- [Discord Developer Portal](https://discord.com/developers/applications) - Create Discord bots
+# Authentication
+OPENCLAW_GATEWAY_TOKEN=your-stable-token-here
+```
+
+## 📋 What This Template Deploys
+
+- **OpenClaw AI Agent**: Self-hosted framework with command execution
+- **Express Wrapper Server**: Gateway management and setup wizard
+- **Railway Integration**: Volume persistence, health checks, monitoring
+- **Memory Optimization**: Pre-configured Node.js memory limits
+- **Production Ready**: Enhanced error handling and diagnostics
+
+## 🏗️ Architecture
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   Railway      │    │  Express Wrapper │    │  OpenClaw       │
+│   Load Balancer│────▶│   Server (8080)  │────▶│  Gateway (18789)│
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                              │
+                              ▼
+                       ┌─────────────────┐
+                       │   Setup Wizard  │
+                       │   /setup/*      │
+                       └─────────────────┘
+```
+
+## 🔍 Features
+
+- **Zero Configuration**: Works out of the box with sensible defaults
+- **Persistent Storage**: Configuration and workspace data preserved across deployments
+- **Memory Optimized**: Pre-configured to prevent JavaScript heap errors
+- **Health Monitoring**: Built-in health checks and debugging endpoints
+- **Secure**: Token-based authentication and secure setup wizard
+- **Scalable**: Easy to scale vertically with configurable memory limits
+
+## 🐛 Troubleshooting
+
+### Gateway Issues
+
+If you experience "Gateway did not become available in time" errors:
+
+1. Check the debug endpoint: `/setup/api/debug`
+2. Review the [Gateway Fix Summary](docs/GATEWAY_FIX_SUMMARY.md)
+3. Verify environment variables in Railway dashboard
+
+### Memory Issues
+
+If you experience JavaScript heap out of memory errors:
+
+1. Increase `NODE_MAX_OLD_SPACE_SIZE` (try 8192)
+2. Review the [Memory Fix Summary](docs/MEMORY_FIX_SUMMARY.md)
+3. Check Railway deployment logs
+
+### Common Issues
+
+- **Setup not accessible**: Verify `SETUP_PASSWORD` is set
+- **Deployment failures**: Check Railway logs and volume mounting
+- **Performance issues**: Monitor memory usage and adjust limits
+
+## 📊 Monitoring
+
+Monitor these metrics in Railway:
+
+- **Memory Usage**: Should stay under allocated limits
+- **Response Time**: Setup wizard and API responses
+- **Error Rate**: Gateway startup failures
+- **Health Checks**: `/setup/healthz` endpoint status
+
+## 🔒 Security
+
+- **Setup Authentication**: Password-protected setup wizard
+- **Gateway Authentication**: Token-based API authentication
+- **Volume Permissions**: Proper file permissions on `/data`
+- **Network Security**: Internal gateway communication on localhost
+
+## 📈 Scaling
+
+- **Vertical Scaling**: Increase memory limits via environment variables
+- **Horizontal Scaling**: Multiple Railway instances (each with own state)
+- **Storage Management**: Automatic volume management by Railway
+
+## 🆘 Support
+
+For issues and support:
+
+1. Check the [Deployment Guide](docs/DEPLOYMENT_GUIDE.md)
+2. Review the [Changelog](docs/CHANGELOG.md) for known issues
+3. Use `/setup/api/debug` endpoint for diagnostics
+4. Check Railway deployment logs
+5. Review OpenClaw documentation
+
+## 📄 License
+
+This project is licensed under the same terms as OpenClaw. See the [LICENSE](LICENSE) file for details.
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ---
 
-## Frequently Asked Questions (FAQ)
-
-### What is OpenClaw?
-
-OpenClaw is a self-hosted AI agent framework that can execute commands, manage files, and perform automated tasks based on user instructions. It runs as a service and can be controlled remotely. 🤖
-
----
-
-### What does this Railway template deploy?
-
-This Railway template deploys OpenClaw as a containerized service on Railway with predefined startup and configuration support.
-
----
-
-### Where can OpenClaw be deployed using this template?
-
-Using this template, OpenClaw is deployed on Railway’s infrastructure and can be accessed remotely from your local machine or supported clients. ☁️
-
----
-
-### How to deploy OpenClaw on Railway?
-
-Click **Deploy on Railway**, follow the on screen simple steps and click on Run Setup. Once running, use the service URL or Railway SSH to interact with OpenClaw. 🚀
-
----
-
-### Does this template deploy OpenClaw locally?
-
-No.
-This template deploys OpenClaw on Railway, not on your local machine.
-
----
-
-### What environment variables are required to run OpenClaw?
-
-At minimum, you need an API key for a supported LLM provider. Additional variables may be required depending on your OpenClaw configuration.
-
----
-
-### Can OpenClaw be accessed publicly when deployed on Railway?
-
-Yes, depending on Railway settings (using SETUP_PASSWORD). You should restrict access if OpenClaw is running with sensitive permissions. 🔒
-
----
-
-### Does this template include OpenClaw plugins or skills?
-
-No.
-Only base OpenClaw is deployed. Plugins or skills must be added manually after deployment from the OpenClaw UI
-
----
-
-### Is data persisted when OpenClaw is hosted on Railway?
-
-Yes, because this template comes with a volume which is persisted across deployments.
-
----
-
-
-
-## Why Deploy OpenClaw Railway Template on Railway?
-
-
-Railway is a singular platform to deploy your infrastructure stack. Railway will host your infrastructure so you don't have to deal with configuration, while allowing you to vertically and horizontally scale it.
-
-By deploying OpenClaw Railway Template on Railway, you are one step closer to supporting a complete full-stack application with minimal burden. Host your servers, databases, AI agents, and more on Railway.
+**Deploy on Railway** and get your OpenClaw instance running in minutes! 🚀

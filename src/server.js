@@ -71,7 +71,7 @@ const INTERNAL_GATEWAY_HOST = process.env.INTERNAL_GATEWAY_HOST ?? "127.0.0.1";
 const GATEWAY_TARGET = `http://${INTERNAL_GATEWAY_HOST}:${INTERNAL_GATEWAY_PORT}`;
 
 const OPENCLAW_ENTRY =
-  process.env.OPENCLAW_ENTRY?.trim() || "/openclaw/dist/entry.js";
+  process.env.OPENCLAW_ENTRY?.trim() || "/usr/local/lib/node_modules/openclaw/dist/entry.js";
 const OPENCLAW_NODE =
   process.env.OPENCLAW_NODE?.trim() ||
   `node --max-old-space-size=${process.env.NODE_MAX_OLD_SPACE_SIZE || "4096"} --max-semi-space-size=${process.env.NODE_MAX_SEMI_SPACE_SIZE || "256"}`;
@@ -120,32 +120,43 @@ function sleep(ms) {
 }
 
 async function waitForGatewayReady(opts = {}) {
-  const timeoutMs = opts.timeoutMs ?? 60_000;
+  const timeoutMs = opts.timeoutMs ?? 120_000; // Increased from 60s to 120s
   const start = Date.now();
-  const endpoints = ["/openclaw", "/openclaw", "/", "/health"];
+  const endpoints = ["/", "/health", "/status", "/openclaw"]; // Better endpoint order
+
+  console.log(`[gateway] waiting for readiness at ${GATEWAY_TARGET} (timeout: ${timeoutMs / 1000}s)`);
 
   while (Date.now() - start < timeoutMs) {
     for (const endpoint of endpoints) {
       try {
         const res = await fetch(`${GATEWAY_TARGET}${endpoint}`, {
           method: "GET",
+          timeout: 5000, // 5s timeout per request
         });
-        if (res) {
-          console.log(`[gateway] ready at ${endpoint}`);
+        if (res && res.ok) {
+          console.log(`[gateway] ready at ${endpoint} (${res.status})`);
           return true;
         }
       } catch (err) {
-        if (err.code !== "ECONNREFUSED" && err.cause?.code !== "ECONNREFUSED") {
+        // Log specific errors for debugging
+        if (err.code === "ECONNREFUSED") {
+          // Expected during startup, don't log
+        } else if (err.cause?.code === "ECONNREFUSED") {
+          // Expected during startup, don't log  
+        } else {
           const msg = err.code || err.message;
           if (msg !== "fetch failed" && msg !== "UND_ERR_CONNECT_TIMEOUT") {
-            console.warn(`[gateway] health check error: ${msg}`);
+            console.warn(`[gateway] health check error on ${endpoint}: ${msg}`);
           }
         }
       }
     }
-    await sleep(250);
+    await sleep(500); // Increased from 250ms to 500ms
   }
+
   console.error(`[gateway] failed to become ready after ${timeoutMs / 1000} seconds`);
+  console.error(`[gateway] attempted endpoints: ${endpoints.join(", ")}`);
+  console.error(`[gateway] target: ${GATEWAY_TARGET}`);
   return false;
 }
 
@@ -155,6 +166,17 @@ async function startGateway() {
 
   fs.mkdirSync(STATE_DIR, { recursive: true });
   fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
+
+  // Verify OpenClaw installation
+  try {
+    const testResult = await runCmd(OPENCLAW_NODE, ["--version"]);
+    if (testResult.code !== 0) {
+      throw new Error(`OpenClaw not working: ${testResult.output}`);
+    }
+    console.log(`[gateway] OpenClaw version: ${testResult.output.trim()}`);
+  } catch (err) {
+    throw new Error(`OpenClaw verification failed: ${err.message}`);
+  }
 
   const args = [
     "gateway",
@@ -170,6 +192,14 @@ async function startGateway() {
   ];
 
   const { nodeCmd, nodeArgs } = parseNodeCommand(OPENCLAW_NODE);
+
+  // Check if OpenClaw entry exists
+  if (!fs.existsSync(OPENCLAW_ENTRY)) {
+    throw new Error(`OpenClaw entry not found at: ${OPENCLAW_ENTRY}`);
+  }
+
+  console.log(`[gateway] OpenClaw entry verified: ${OPENCLAW_ENTRY}`);
+
   gatewayProc = childProcess.spawn(nodeCmd, [...nodeArgs, ...clawArgs(args)], {
     stdio: "inherit",
     env: {
@@ -183,7 +213,7 @@ async function startGateway() {
     args[i - 1] === "--token" ? "[REDACTED]" : arg
   );
   console.log(
-    `[gateway] starting with command: ${OPENCLAW_NODE} ${clawArgs(safeArgs).join(" ")}`,
+    `[gateway] starting with command: ${nodeCmd} ${[...nodeArgs, ...clawArgs(safeArgs)].join(" ")}`,
   );
   console.log(`[gateway] STATE_DIR: ${STATE_DIR}`);
   console.log(`[gateway] WORKSPACE_DIR: ${WORKSPACE_DIR}`);
@@ -206,9 +236,9 @@ async function ensureGatewayRunning() {
   if (!gatewayStarting) {
     gatewayStarting = (async () => {
       await startGateway();
-      const ready = await waitForGatewayReady({ timeoutMs: 60_000 });
+      const ready = await waitForGatewayReady({ timeoutMs: 120_000 }); // Use increased timeout
       if (!ready) {
-        throw new Error("Gateway did not become ready in time");
+        throw new Error("Gateway did not become ready in time (120s)");
       }
     })().finally(() => {
       gatewayStarting = null;
@@ -302,7 +332,26 @@ const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
 
-app.get("/setup/healthz", (_req, res) => res.json({ ok: true }));
+app.get("/setup/healthz", (_req, res) => {
+  const health = {
+    ok: true,
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    version: process.env.npm_package_version || "1.1.0",
+    node: process.version,
+    memory: process.memoryUsage(),
+    configured: isConfigured(),
+    gateway: {
+      running: gatewayProc !== null,
+      starting: gatewayStarting !== null,
+      ready: isGatewayReady(),
+    }
+  };
+  
+  // Only return 200 if basic health checks pass
+  const isHealthy = health.ok && health.configured;
+  res.status(isHealthy ? 200 : 503).json(health);
+});
 
 app.get("/setup/styles.css", (_req, res) => {
   res.type("text/css");
@@ -708,6 +757,29 @@ app.get("/setup/api/debug", requireSetupAuth, async (_req, res) => {
     OPENCLAW_NODE,
     clawArgs(["channels", "add", "--help"]),
   );
+
+  // Check gateway status
+  let gatewayStatus = "not running";
+  let gatewayError = null;
+  try {
+    if (gatewayProc) {
+      gatewayStatus = "running";
+      if (gatewayStarting) {
+        gatewayStatus = "starting";
+      }
+    }
+  } catch (err) {
+    gatewayError = err.message;
+  }
+
+  // Test OpenClaw entry point
+  let entryPointExists = false;
+  try {
+    entryPointExists = fs.existsSync(OPENCLAW_ENTRY);
+  } catch (err) {
+    gatewayError = `Entry point check failed: ${err.message}`;
+  }
+
   res.json({
     wrapper: {
       node: process.version,
@@ -720,12 +792,22 @@ app.get("/setup/api/debug", requireSetupAuth, async (_req, res) => {
         path.join(STATE_DIR, "gateway.token"),
       ),
       railwayCommit: process.env.RAILWAY_GIT_COMMIT_SHA || null,
+      gatewayStatus,
+      gatewayTarget: GATEWAY_TARGET,
+      internalGatewayPort: INTERNAL_GATEWAY_PORT,
     },
     openclaw: {
-      entry: OPENCLAW_ENTRY,
-      node: OPENCLAW_NODE,
+      entryPoint: OPENCLAW_ENTRY,
+      entryPointExists,
+      nodeCommand: OPENCLAW_NODE,
       version: v.output.trim(),
-      channelsAddHelpIncludesTelegram: help.output.includes("telegram"),
+      code: v.code,
+      channelsHelp: help.output.trim(),
+      channelsCode: help.code,
+    },
+    gateway: {
+      status: gatewayStatus,
+      error: gatewayError,
     },
   });
 });
