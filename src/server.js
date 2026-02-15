@@ -71,16 +71,8 @@ const INTERNAL_GATEWAY_HOST = process.env.INTERNAL_GATEWAY_HOST ?? "127.0.0.1";
 const GATEWAY_TARGET = `http://${INTERNAL_GATEWAY_HOST}:${INTERNAL_GATEWAY_PORT}`;
 
 const OPENCLAW_ENTRY =
-  process.env.OPENCLAW_ENTRY?.trim() || (() => {
-    // Dynamic path resolution for Railway environment
-    try {
-      const globalNodeModules = childProcess.execSync('npm root -g').toString().trim();
-      return path.join(globalNodeModules, 'openclaw', 'dist', 'entry.js');
-    } catch (err) {
-      console.warn(`[config] Could not resolve OpenClaw path dynamically: ${err.message}`);
-      return "/usr/local/lib/node_modules/openclaw/dist/entry.js"; // fallback
-    }
-  })();
+  process.env.OPENCLAW_ENTRY?.trim() ||
+  "/usr/local/lib/node_modules/openclaw/dist/entry.js";
 const OPENCLAW_NODE =
   process.env.OPENCLAW_NODE?.trim() ||
   `node --max-old-space-size=${process.env.NODE_MAX_OLD_SPACE_SIZE || "4096"} --max-semi-space-size=${process.env.NODE_MAX_SEMI_SPACE_SIZE || "256"}`;
@@ -118,15 +110,6 @@ function isConfigured() {
     process.env.OPENCLAW_GATEWAY_TOKEN?.trim() ||
     fs.existsSync(path.join(STATE_DIR, "gateway.token"))
   );
-}
-
-function isOpenClawInstalled() {
-  try {
-    return fs.existsSync(OPENCLAW_ENTRY);
-  } catch (err) {
-    console.warn(`[config] Could not check OpenClaw installation: ${err.message}`);
-    return false;
-  }
 }
 
 let gatewayProc = null;
@@ -184,6 +167,29 @@ async function startGateway() {
   fs.mkdirSync(STATE_DIR, { recursive: true });
   fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
 
+  // Check if OpenClaw entry exists, if not try alternative paths
+  let openclawEntry = OPENCLAW_ENTRY;
+  if (!fs.existsSync(openclawEntry)) {
+    // Try common alternative paths in container environments
+    const alternatives = [
+      "/usr/local/lib/node_modules/openclaw/dist/entry.js",
+      "/app/node_modules/openclaw/dist/entry.js",
+      "/home/openclaw/.npm/global/lib/node_modules/openclaw/dist/entry.js"
+    ];
+
+    for (const alt of alternatives) {
+      if (fs.existsSync(alt)) {
+        openclawEntry = alt;
+        console.log(`[gateway] Using alternative OpenClaw entry: ${alt}`);
+        break;
+      }
+    }
+
+    if (!fs.existsSync(openclawEntry)) {
+      throw new Error(`OpenClaw entry not found. Tried: ${OPENCLAW_ENTRY}, ${alternatives.join(", ")}`);
+    }
+  }
+
   // Verify OpenClaw installation
   try {
     const testResult = await runCmd(OPENCLAW_NODE, ["--version"]);
@@ -194,6 +200,8 @@ async function startGateway() {
   } catch (err) {
     throw new Error(`OpenClaw verification failed: ${err.message}`);
   }
+
+  console.log(`[gateway] OpenClaw entry verified: ${openclawEntry}`);
 
   const args = [
     "gateway",
@@ -210,14 +218,7 @@ async function startGateway() {
 
   const { nodeCmd, nodeArgs } = parseNodeCommand(OPENCLAW_NODE);
 
-  // Check if OpenClaw entry exists
-  if (!fs.existsSync(OPENCLAW_ENTRY)) {
-    throw new Error(`OpenClaw entry not found at: ${OPENCLAW_ENTRY}`);
-  }
-
-  console.log(`[gateway] OpenClaw entry verified: ${OPENCLAW_ENTRY}`);
-
-  gatewayProc = childProcess.spawn(nodeCmd, [...nodeArgs, ...clawArgs(args)], {
+  gatewayProc = childProcess.spawn(nodeCmd, [...nodeArgs, "--", openclawEntry, ...args], {
     stdio: "inherit",
     env: {
       ...process.env,
@@ -230,7 +231,7 @@ async function startGateway() {
     args[i - 1] === "--token" ? "[REDACTED]" : arg
   );
   console.log(
-    `[gateway] starting with command: ${nodeCmd} ${[...nodeArgs, ...clawArgs(safeArgs)].join(" ")}`,
+    `[gateway] starting with command: ${nodeCmd} ${[...nodeArgs, "--", openclawEntry, ...clawArgs(safeArgs)].join(" ")}`,
   );
   console.log(`[gateway] STATE_DIR: ${STATE_DIR}`);
   console.log(`[gateway] WORKSPACE_DIR: ${WORKSPACE_DIR}`);
@@ -253,20 +254,15 @@ async function ensureGatewayRunning() {
   if (!gatewayStarting) {
     gatewayStarting = (async () => {
       await startGateway();
-      // For Railway, use a longer timeout but don't block healthcheck
-      const ready = await waitForGatewayReady({ timeoutMs: 240_000 }); // 4 minutes for Railway
+      const ready = await waitForGatewayReady({ timeoutMs: 120_000 }); // Use increased timeout
       if (!ready) {
-        console.error(`[gateway] failed to become ready after 240 seconds`);
-        // Don't throw error - let the deployment succeed and try to start gateway later
-        return false;
+        throw new Error("Gateway did not become ready in time (120s)");
       }
-      return true;
     })().finally(() => {
       gatewayStarting = null;
     });
   }
-  // Don't wait for gateway to be ready for Railway healthcheck
-  // Just ensure the startup process has begun
+  await gatewayStarting;
   return { ok: true };
 }
 
@@ -355,8 +351,6 @@ app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
 
 app.get("/setup/healthz", (_req, res) => {
-  // Railway healthcheck - return 200 quickly for basic wrapper health
-  // Gateway readiness is handled separately in startup
   const health = {
     ok: true,
     timestamp: new Date().toISOString(),
@@ -365,23 +359,14 @@ app.get("/setup/healthz", (_req, res) => {
     node: process.version,
     memory: process.memoryUsage(),
     configured: isConfigured(),
-    openclaw_installed: isOpenClawInstalled(),
-    openclaw_entry: OPENCLAW_ENTRY,
     gateway: {
       running: gatewayProc !== null,
       starting: gatewayStarting !== null,
       ready: isGatewayReady(),
-    },
-    railway: {
-      environment: process.env.RAILWAY_ENVIRONMENT || "unknown",
-      service: process.env.RAILWAY_SERVICE_NAME || "unknown",
-      volume_mounted: fs.existsSync('/data'),
     }
   };
 
-  // For Railway healthcheck, require wrapper to be configured and OpenClaw installed
-  // Gateway can start up after deployment is live
-  const isHealthy = health.ok && health.configured && health.openclaw_installed && health.railway.volume_mounted;
+  const isHealthy = health.ok && health.configured;
   res.status(isHealthy ? 200 : 503).json(health);
 });
 
