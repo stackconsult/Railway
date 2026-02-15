@@ -17,3 +17,6 @@ npm-debug.log*
 .claude/
 .serena/
 .tmpdata/
+
+# OpenMemory - IDE/Assistant specific rules
+.windsurf/rules/openmemory.md
